@@ -1,6 +1,8 @@
 from pathlib import Path
 import argparse
 import re
+import shutil
+
 
 def make_folder(folder: str):
     """Test to see if the given folder already exists, and if not, it will create the folder.
@@ -12,6 +14,7 @@ def make_folder(folder: str):
     
     if not path.exists():
         path.mkdir()
+
 
 def get_data_from_file(path: str) -> str:
     """Function to get a string of the content of the file in a path.
@@ -30,6 +33,7 @@ def get_data_from_file(path: str) -> str:
         
     return data
 
+
 def write_file(output_file : Path, file_data : str) -> None:
     """Write contents to a file. If the file does not exists yet, the file will be created. All previous content in the file will be overwritten!
 
@@ -44,19 +48,18 @@ def write_file(output_file : Path, file_data : str) -> None:
         filewriter.write(file_data)
         
 
-def parse_file(input_file_path: Path) -> str:
+def parse_file(input_file_path: Path, project_folder: Path) -> str:
     """Parses the input file in order to remove all the \input statements from the file.
 
     Args:
         input_file_path (Path): Input LaTeX file to parse.
+        project_folder (Path): Input project folder.
 
     Returns:
         str: Output content of the new LaTeX file.
     """
     assert input_file_path.exists(), "Input file does not exist."
     assert input_file_path.is_file(), "Input should be a file, not a folder."
-    
-    project_folder = input_file_path.parent.absolute()
     
     return_content = get_data_from_file(input_file_path)
     
@@ -81,6 +84,18 @@ def parse_file(input_file_path: Path) -> str:
 
     return return_content
 
+
+def remove_path_graphics(input: str) -> str:
+    find = r"\\includegraphics(?P<size>.*){(?:.*/)?(?P<path>.*)}"
+    replace = r"\\includegraphics\g<size>{\g<path>}"
+    
+    return re.sub(find, replace, input)
+
+
+def find_graphics_in_file(input_file: str) -> tuple[list[str], list[str]]:
+    return re.findall(r"\\includegraphics(?:.*){(.*)}", input_file)
+
+
 def find_amount_of_inputs(input_file: str) -> int:
     """Find the amounts of inputs that are yet to be replaced in the input file.
 
@@ -93,6 +108,7 @@ def find_amount_of_inputs(input_file: str) -> int:
     inputs, _ = find_inputs_in_file(input_file)
     
     return len(inputs)
+
 
 def find_inputs_in_file(input_file: str) -> tuple[list[str], list[str]]:
     """Find a list of input files and splits the output file around the inputs.
@@ -109,16 +125,59 @@ def find_inputs_in_file(input_file: str) -> tuple[list[str], list[str]]:
     return input_statements,splitted_file
     
     
+def extract_graphics_files(project_folder: Path, output_folder: Path, new_file_data: str) -> None:
+    """Function to move all the included graphics files to the output folder.
+
+    Args:
+        project_folder (Path): Input project folder
+        output_folder (Path): Output folder of the project
+        new_file_data (str): Data of the main LaTeX file
+    """    
+    files = find_graphics_in_file(new_file_data)
+    
+    for file in files:
+        possible_files = list(project_folder.glob(file + ".*")) + list(project_folder.glob(file))
+        
+        for possible_file in possible_files:
+            output_file = output_folder / Path(possible_file.name)
+
+            shutil.copyfile(str(possible_file), str(output_file.absolute()))
+    
+            
+def copy_bib_files(project_folder: Path, output_folder: Path) -> None:
+    """Copy all the bib files to the output folder.
+
+    Args:
+        project_folder (Path): Input project folder
+        output_folder (Path): Output folder of the project
+    """    
+    bib_files = project_folder.glob("*.bib")
+    
+    for bib_file in bib_files:
+        shutil.copyfile(str(bib_file), str(output_folder / Path(bib_file.name)))
+
+    
 def main(input_file: Path, output_folder: Path) -> None:
+    """Main function of the program. Preprocesses the LaTeX file to make a single LaTeX file and moves all the images to the correct locations.
+
+    Args:
+        input_file (Path): Input path of the main input file.
+        output_folder (Path): Folder where the output is written to.
+    """    
     make_folder(output_folder)
     
-    new_file_data = parse_file(input_file)
+    project_folder = input_file.parent.absolute()
+    
+    new_file_data = parse_file(input_file, project_folder)
+    
+    extract_graphics_files(project_folder, output_folder, new_file_data)
+        
+    new_file_data = remove_path_graphics(new_file_data)
     
     output_file = output_folder / Path(input_file.name)
     
     write_file(output_file, new_file_data)
-
-
+    copy_bib_files(project_folder, output_folder)
     
 
 def parse_args() -> tuple[Path, Path]:
@@ -130,6 +189,7 @@ def parse_args() -> tuple[Path, Path]:
     parsed_arguments = arg_parser.parse_args()
     
     return Path(parsed_arguments.input_file), Path(parsed_arguments.output_folder)
+
 
 if __name__ == "__main__":
     main(*parse_args())
